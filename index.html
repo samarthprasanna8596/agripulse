@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>AgriPulse Precision Agriculture</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .card { border: 1px solid #ccc; padding: 10px; margin: 10px; }
+    .green { background-color: #c8f7c5; }
+    .yellow { background-color: #fff3b0; }
+    .red { background-color: #f7c5c5; }
+    pre { font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>AgriPulse Dashboard</h1>
+  <form id="uploadForm">
+    <label>Select Crop:</label>
+    <select id="crop">
+      <option value="TOMATO">Tomato</option>
+      <option value="WHEAT">Wheat</option>
+      <option value="RICE">Rice</option>
+      <option value="MAIZE">Maize</option>
+    </select>
+    <br><br>
+    <input type="file" id="csvFile" accept=".csv" />
+    <button type="submit">Analyze</button>
+  </form>
+
+  <div id="results"></div>
+
+  <script>
+    const cropRules = {
+      TOMATO: { ph: [6.0, 7.0], key: "potassium", threshold: 200 },
+      WHEAT: { ph: [6.0, 7.5], key: "nitrogen", threshold: 30 },
+      RICE: { ph: [5.0, 6.5], key: "phosphorus", threshold: 25 },
+      MAIZE: { ph: [5.8, 7.0], key: "nitrogen", threshold: 35 }
+    };
+
+    const universal = { nitrogen: 20, phosphorus: 15, potassium: 150 };
+    const fertMap = {
+      nitrogen: "Apply Urea Fertilizer",
+      phosphorus: "Apply DAP (Diammonium Phosphate)",
+      potassium: "Apply MOP (Muriate of Potash)"
+    };
+
+    document.getElementById("uploadForm").addEventListener("submit", function(e) {
+      e.preventDefault();
+      const crop = document.getElementById("crop").value;
+      const file = document.getElementById("csvFile").files[0];
+      if (!file) return alert("Upload a CSV file!");
+
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        const lines = evt.target.result.split("\n").slice(1); // skip header
+        const resultsDiv = document.getElementById("results");
+        resultsDiv.innerHTML = "";
+
+        lines.forEach(line => {
+          if (!line.trim()) return;
+          const [soil_id, N, P, K, ph] = line.split(",");
+          const row = {
+            soil_id, nitrogen: parseFloat(N), phosphorus: parseFloat(P),
+            potassium: parseFloat(K), ph_level: parseFloat(ph)
+          };
+          const result = calculateScore(row, crop);
+          const card = document.createElement("div");
+          card.className = "card " + getColor(result.recommendation.suitability_score);
+          card.innerHTML = "<pre>" + JSON.stringify(result, null, 2) + "</pre>";
+          resultsDiv.appendChild(card);
+        });
+      };
+      reader.readAsText(file);
+    });
+
+    function calculateScore(row, crop) {
+      let score = 100;
+      let deficiencies = [];
+      let fertPlan = [];
+
+      const [phLow, phHigh] = cropRules[crop].ph;
+      if (!(row.ph_level >= phLow && row.ph_level <= phHigh)) score -= 20;
+
+      for (let nutrient in universal) {
+        if (row[nutrient] < universal[nutrient]) {
+          score -= 15;
+          deficiencies.push(nutrient);
+          fertPlan.push(fertMap[nutrient]);
+        }
+      }
+
+      const key = cropRules[crop].key;
+      const highDemand = cropRules[crop].threshold;
+      if (row[key] < highDemand) {
+        score -= 10;
+        if (!deficiencies.includes(key)) {
+          deficiencies.push(key);
+          fertPlan.push(fertMap[key]);
+        }
+      }
+
+      let health = score >= 80 ? "Optimal" : score >= 60 ? "Deficient" : "Critical";
+      let explanation = `${crop} needs strong ${key} levels for healthy growth. Adding ${fertMap[key]} helps improve soil balance.`;
+
+      return {
+        soil_id: row.soil_id,
+        target_crop: crop,
+        health_metrics: {
+          overall_health: health,
+          critical_deficiencies: deficiencies.map(d => d.charAt(0).toUpperCase() + d.slice(1))
+        },
+        recommendation: {
+          fertilizer_plan: fertPlan.length ? fertPlan.join(", ") : "No action needed",
+          suitability_score: score
+        },
+        ai_explanation: explanation
+      };
+    }
+
+    function getColor(score) {
+      if (score >= 80) return "green";
+      if (score >= 60) return "yellow";
+      return "red";
+    }
+  </script>
+</body>
+</html>
